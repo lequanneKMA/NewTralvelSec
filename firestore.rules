@@ -1,0 +1,203 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==================== HELPER FUNCTIONS ====================
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user is the owner of the resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin';
+    }
+    
+    // Validate email format
+    function isValidEmail(email) {
+      return email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+    
+    // Validate phone number (Vietnam format) - optional field
+    function isValidPhone(phone) {
+      return phone == '' || phone.matches('^0[0-9]{9}$');
+    }
+    
+    // Validate price (must be positive)
+    function isValidPrice(price) {
+      return price is number && price > 0 && price < 1000000000; // Max 1 tỷ VNĐ
+    }
+    
+    
+    // ==================== USERS COLLECTION ====================
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles (for display names, avatars, etc.)
+      allow read: if isAuthenticated();
+      
+      // Users can create their own profile (during registration) - flexible fields
+      allow create: if isAuthenticated() 
+                    && isOwner(userId)
+                    && request.resource.data.email is string
+                    && isValidEmail(request.resource.data.email);
+      
+      // Users can update their own profile, admin can update anyone
+      allow update: if isOwner(userId) || isAdmin();
+      
+      // Only admin can delete users
+      allow delete: if isAdmin();
+    }
+    
+    
+    // ==================== PLACES COLLECTION ====================
+    match /places/{placeId} {
+      // Anyone can read places (public destinations)
+      allow read: if true;
+      
+      // Only admin can create/update/delete places
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    
+    // ==================== TOURS COLLECTION ====================
+    match /tours/{tourId} {
+      // Anyone can read tours (public catalog)
+      allow read: if true;
+      
+      // Only admin can create/update/delete tours
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    
+    // ==================== BOOKINGS COLLECTION ====================
+    match /bookings/{bookingId} {
+      // Users can only read their own bookings, admin can read all
+      allow read: if isAuthenticated() 
+                  && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Users can create bookings for themselves only
+      // REQUIRE APP CHECK to prevent fake bookings from scripts/bots
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && isValidPrice(request.resource.data.totalPrice)
+                    && request.resource.data.numPeople is int
+                    && request.resource.data.numPeople > 0
+                    && request.resource.data.numPeople <= 50
+                    && request.resource.data.status == 'pending'
+                    && request.app != null; // ← REQUIRE APP CHECK TOKEN
+      
+      // Only admin can update bookings (to change status, etc.)
+      allow update: if isAdmin();
+      
+      // Only admin can delete bookings
+      allow delete: if isAdmin();
+    }
+    
+    
+    // ==================== BOOKED_TOURS COLLECTION ====================
+    match /booked_tours/{bookedTourId} {
+      // Users can only read their own booked tours, admin can read all
+      allow read: if isAuthenticated() 
+                  && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Users can create booked tours for themselves only
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid;
+      
+      // Only admin can update/delete booked tours
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    
+    // ==================== INVOICES COLLECTION ====================
+    match /invoices/{invoiceId} {
+      // Users can only read their own invoices, admin can read all
+      allow read: if isAuthenticated() 
+                  && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Only admin can create/update invoices (after payment confirmation)
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    
+    // ==================== REVIEWS COLLECTION ====================
+    match /reviews/{reviewId} {
+      // Anyone can read reviews (public feedback)
+      allow read: if true;
+      
+      // Users can create reviews for themselves only
+      // REQUIRE APP CHECK to prevent fake reviews from bots
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.rating is number
+                    && request.resource.data.rating >= 1
+                    && request.resource.data.rating <= 5
+                    && request.app != null; // ← REQUIRE APP CHECK TOKEN
+      
+      // Users can update/delete their own reviews, admin can do everything
+      allow update: if isAuthenticated() 
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      allow delete: if isAuthenticated() 
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+    
+    
+    // ==================== TOUR_CHATS COLLECTION ====================
+    match /tour_chats/{chatId} {
+      // Users can read chats they're part of, admin can read all
+      allow read: if isAuthenticated() 
+                  && (resource.data.get('userId', '') == request.auth.uid || isAdmin());
+      
+      // Users can create/update chat rooms for themselves
+      allow create, update: if isAuthenticated() 
+                            && request.resource.data.get('userId', '') == request.auth.uid;
+      
+      // Only admin can delete chat rooms
+      allow delete: if isAdmin();
+      
+      // Messages subcollection
+      match /messages/{messageId} {
+        // Users can read messages in their chats, admin can read all
+        allow read: if isAuthenticated() 
+                    && (get(/databases/$(database)/documents/tour_chats/$(chatId)).data.get('userId', '') == request.auth.uid 
+                        || isAdmin());
+        
+        // Users can send messages in their own chats
+        allow create: if isAuthenticated()
+                      && request.resource.data.senderId == request.auth.uid
+                      && request.resource.data.message is string
+                      && request.resource.data.message.size() > 0
+                      && request.resource.data.message.size() <= 2000;
+        
+        // Users can update their own messages, admin can update any
+        allow update: if isAuthenticated() 
+                      && (resource.data.senderId == request.auth.uid || isAdmin());
+        
+        // Users can delete their own messages, admin can delete any
+        allow delete: if isAuthenticated() 
+                      && (resource.data.senderId == request.auth.uid || isAdmin());
+      }
+    }
+    
+    
+    // ==================== DEFAULT DENY ALL ====================
+    // Deny all other collections by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
