@@ -117,4 +117,103 @@ class AuthService {
 
   // AUTH STATE STREAM
   Stream<User?> get authStateChanges => _firebaseAuth.authStateChanges();
+
+  // ==================== PHONE OTP VERIFICATION ====================
+  
+  String? _verificationId;
+  int? _resendToken;
+  
+  // Gửi OTP đến số điện thoại
+  Future<void> sendOTP(String phoneNumber, {
+    required Function(String) onCodeSent,
+    required Function(String) onError,
+    Function()? onAutoVerified,
+  }) async {
+    try {
+      // Format phone number (Vietnam: +84)
+      String formattedPhone = phoneNumber.trim();
+      if (formattedPhone.startsWith('0')) {
+        formattedPhone = '+84${formattedPhone.substring(1)}';
+      } else if (!formattedPhone.startsWith('+')) {
+        formattedPhone = '+84$formattedPhone';
+      }
+
+      await _firebaseAuth.verifyPhoneNumber(
+        phoneNumber: formattedPhone,
+        timeout: const Duration(seconds: 60),
+        
+        // Auto verification (Android only)
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          try {
+            // Link phone to current user
+            final user = _firebaseAuth.currentUser;
+            if (user != null) {
+              await user.updatePhoneNumber(credential);
+              if (onAutoVerified != null) onAutoVerified();
+            }
+          } catch (e) {
+            onError('Xác thực tự động thất bại: $e');
+          }
+        },
+        
+        // Verification failed
+        verificationFailed: (FirebaseAuthException e) {
+          if (e.code == 'invalid-phone-number') {
+            onError('Số điện thoại không hợp lệ');
+          } else if (e.code == 'too-many-requests') {
+            onError('Quá nhiều yêu cầu. Vui lòng thử lại sau');
+          } else {
+            onError('Xác thực thất bại: ${e.message}');
+          }
+        },
+        
+        // OTP sent successfully
+        codeSent: (String verificationId, int? resendToken) {
+          _verificationId = verificationId;
+          _resendToken = resendToken;
+          onCodeSent('Mã OTP đã được gửi đến $formattedPhone');
+        },
+        
+        // Auto-retrieval timeout
+        codeAutoRetrievalTimeout: (String verificationId) {
+          _verificationId = verificationId;
+        },
+        
+        forceResendingToken: _resendToken,
+      );
+    } catch (e) {
+      onError('Lỗi gửi OTP: $e');
+    }
+  }
+  
+  // Xác thực OTP
+  Future<bool> verifyOTP(String smsCode) async {
+    try {
+      if (_verificationId == null) {
+        throw Exception('Vui lòng gửi OTP trước');
+      }
+      
+      final credential = PhoneAuthProvider.credential(
+        verificationId: _verificationId!,
+        smsCode: smsCode,
+      );
+      
+      // Update phone number for current user
+      final user = _firebaseAuth.currentUser;
+      if (user != null) {
+        await user.updatePhoneNumber(credential);
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      throw Exception('Mã OTP không đúng hoặc đã hết hạn');
+    }
+  }
+  
+  // Check if phone number is verified
+  bool isPhoneVerified() {
+    final user = _firebaseAuth.currentUser;
+    return user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty;
+  }
 }

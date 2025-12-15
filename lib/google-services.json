@@ -1,0 +1,63 @@
+{
+  "project_info": {
+    "project_number": "993849056647",
+    "project_id": "lnmqne",
+    "storage_bucket": "lnmqne.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993849056647:android:eac494217b8c74b2f48722",
+        "android_client_info": {
+          "package_name": "com.example.lnmq"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "993849056647-8522lfuq4b5qlcgltb1fgm5hdmsv9b76.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.lnmq",
+            "certificate_hash": "590efe61e7d0a2cab0a639bd8a49b55fa5687622"
+          }
+        },
+        {
+          "client_id": "993849056647-eedhaai3mmdgdtuts5gt0u6d8iqmpnct.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.lnmq",
+            "certificate_hash": "be6008eff1d3fe9250307d49d1b7da9b1d1dcb40"
+          }
+        },
+        {
+          "client_id": "993849056647-uv7mfe8ro7fbs0on433dhu0ccfvlhrv2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.lnmq",
+            "certificate_hash": "52cf5198ce6870af2d5656f5c3031884235adcf6"
+          }
+        },
+        {
+          "client_id": "993849056647-uu9suri4mg68ls53b4p190nmn5osvgf9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMQPbz47CVgzz9POO886TS4Z7PlvVqCW0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "993849056647-uu9suri4mg68ls53b4p190nmn5osvgf9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

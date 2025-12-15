@@ -7,10 +7,24 @@ import 'package:lnmq/firebase_options.dart';
 import 'package:lnmq/screens/auth_screen.dart';
 import 'package:lnmq/screens/home_screen.dart';
 import 'package:lnmq/admin_screens/admin_home_screen.dart';
+import 'package:lnmq/services/security_service.dart';
 // import 'package:lnmq/utils/migrate_chat_data.dart'; // Sửa đường dẫn
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // ==================== SECURITY CHECK ====================
+  // Check device security (root detection)
+  print('🔍 Checking device security...');
+  final securityStatus = await SecurityService.checkDeviceSecurity();
+  print('Device Security Status: $securityStatus');
+  
+  if (securityStatus['isRooted'] == true) {
+    print('⚠️ WARNING: Device is rooted!');
+    // Trong production, có thể exit app hoặc show warning
+    // SystemNavigator.pop(); // Exit app
+  }
+  // ==================== END SECURITY CHECK ====================
   
   // Initialize Firebase
   await Firebase.initializeApp(
@@ -18,19 +32,12 @@ void main() async {
   );
   
   // ==================== FIREBASE APP CHECK ====================
-  // Activate App Check to protect against fake apps and requests
+  // Layer 1: Firebase App Check (basic protection)
   await FirebaseAppCheck.instance.activate(
-    // For Android: Use debug provider in development, Play Integrity in production
-    androidProvider: AndroidProvider.debug, // Change to playIntegrity for production
-    
-    // For iOS: Use debug provider in development, App Attest in production
-    appleProvider: AppleProvider.debug, // Change to appAttest for production
-    
-    // For Web
-    webProvider: ReCaptchaV3Provider('recaptcha-v3-site-key'), // Get from Firebase Console
+    androidProvider: AndroidProvider.debug, // Dev only
+    appleProvider: AppleProvider.debug,
   );
-  
-  print('🔒 Firebase App Check activated - App is protected!');
+  print('🔒 Firebase App Check activated');
   // ==================== END APP CHECK ====================
   
   // THÊM: Chạy migration một lần khi app khởi động (optional)

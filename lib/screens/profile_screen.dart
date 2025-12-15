@@ -23,6 +23,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Controllers cho các trường thông tin
   late TextEditingController _displayNameController;
   late TextEditingController _phoneController;
+  late TextEditingController _otpController;
   late TextEditingController _addressController;
   late TextEditingController _birthdateController;
   late TextEditingController _emergencyContactController;
@@ -32,6 +33,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   
   File? _pickedImage;
   bool _isLoading = false;
+  bool _otpSent = false;
+  bool _otpVerified = false;
+  bool _isSendingOTP = false;
   String _selectedGender = 'Khác';
   DateTime? _selectedBirthdate;
 
@@ -53,6 +57,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _displayNameController = TextEditingController();
     _phoneController = TextEditingController();
+    _otpController = TextEditingController();
     _addressController = TextEditingController();
     _birthdateController = TextEditingController();
     _emergencyContactController = TextEditingController();
@@ -82,6 +87,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           
           _selectedGender = appUser.gender ?? 'Khác';
           _selectedPreferences = appUser.travelPreferences ?? [];
+          
+          // Check if phone number is already verified in Firebase Auth
+          if (currentUser.phoneNumber != null && currentUser.phoneNumber!.isNotEmpty) {
+            // Format Firebase phone number to match input (+84xxx → 0xxx)
+            String firebasePhone = currentUser.phoneNumber!;
+            String localPhone = _phoneController.text.trim();
+            
+            // Convert Firebase phone (+84974585626) to local format (0974585626)
+            if (firebasePhone.startsWith('+84') && localPhone.startsWith('0')) {
+              String firebasePhoneLocal = '0${firebasePhone.substring(3)}';
+              if (firebasePhoneLocal == localPhone) {
+                _otpVerified = true; // Phone already verified in Firebase
+              }
+            }
+          }
           
           setState(() {});
         }
@@ -115,7 +135,102 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _sendOTP() async {
+    final phone = _phoneController.text.trim();
+    
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng nhập số điện thoại')),
+      );
+      return;
+    }
+    
+    // Validate phone format
+    if (!RegExp(r'^0[0-9]{9}$').hasMatch(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Số điện thoại không hợp lệ (10 số, bắt đầu bằng 0)')),
+      );
+      return;
+    }
+
+    setState(() => _isSendingOTP = true);
+
+    await _authService.sendOTP(
+      phone,
+      onCodeSent: (message) {
+        setState(() {
+          _otpSent = true;
+          _isSendingOTP = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      },
+      onError: (error) {
+        setState(() => _isSendingOTP = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error), backgroundColor: Colors.red),
+        );
+      },
+      onAutoVerified: () {
+        setState(() {
+          _otpSent = true;
+          _otpVerified = true;
+          _isSendingOTP = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Số điện thoại đã được xác thực tự động!'), backgroundColor: Colors.green),
+        );
+      },
+    );
+  }
+
+  Future<void> _verifyOTP() async {
+    final otp = _otpController.text.trim();
+    
+    if (otp.isEmpty || otp.length != 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng nhập mã OTP 6 số')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final success = await _authService.verifyOTP(otp);
+      if (success) {
+        setState(() => _otpVerified = true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Xác thực OTP thành công!'), backgroundColor: Colors.green),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _updateProfile() async {
+    // Kiểm tra OTP nếu có số điện thoại
+    final phone = _phoneController.text.trim();
+    if (phone.isNotEmpty && !_otpVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vui lòng xác thực OTP trước khi cập nhật hồ sơ'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -138,7 +253,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Cập nhật Firestore user document với thông tin chi tiết
       await _userService.updateUserProfile(
         displayName: _displayNameController.text.trim(),
-        phoneNumber: _phoneController.text.trim(),
+        phoneNumber: phone,
         address: _addressController.text.trim(),
         birthdate: _selectedBirthdate,
         gender: _selectedGender,
@@ -154,6 +269,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Cập nhật hồ sơ thành công!')),
         );
+        // Reset OTP state after successful update
+        setState(() {
+          _otpSent = false;
+          _otpVerified = false;
+          _otpController.clear();
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -174,6 +295,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     _displayNameController.dispose();
     _phoneController.dispose();
+    _otpController.dispose();
     _addressController.dispose();
     _birthdateController.dispose();
     _emergencyContactController.dispose();
@@ -274,17 +396,152 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                TextField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(
-                    labelText: 'Số điện thoại *',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    prefixIcon: const Icon(Icons.phone),
-                    hintText: '0901234567',
-                  ),
+                // Phone number with OTP verification
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: InputDecoration(
+                          labelText: 'Số điện thoại *',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          prefixIcon: const Icon(Icons.phone),
+                          hintText: '0901234567',
+                          suffixIcon: _otpVerified
+                              ? const Icon(Icons.verified, color: Colors.green)
+                              : null,
+                          helperText: _otpVerified ? 'Đã xác thực' : 'Cần xác thực OTP',
+                          helperStyle: TextStyle(
+                            color: _otpVerified ? Colors.green : Colors.orange,
+                            fontSize: 11,
+                          ),
+                        ),
+                        onChanged: (value) {
+                          // Reset OTP state when phone changes
+                          if (_otpSent || _otpVerified) {
+                            setState(() {
+                              _otpSent = false;
+                              _otpVerified = false;
+                              _otpController.clear();
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 1,
+                      child: ElevatedButton(
+                        onPressed: (_isSendingOTP || _otpVerified) ? null : _sendOTP,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _otpVerified ? Colors.green : Colors.blueAccent,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: _isSendingOTP
+                            ? const SizedBox(
+                                height: 16,
+                                width: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                _otpVerified ? 'Đã xác thực' : (_otpSent ? 'Gửi lại' : 'Gửi OTP'),
+                                style: const TextStyle(fontSize: 12),
+                                textAlign: TextAlign.center,
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
+                
+                // OTP input field (show only after OTP sent)
+                if (_otpSent && !_otpVerified) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: _otpController,
+                          keyboardType: TextInputType.number,
+                          maxLength: 6,
+                          decoration: InputDecoration(
+                            labelText: 'Nhập mã OTP',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                            prefixIcon: const Icon(Icons.security),
+                            hintText: '123456',
+                            counterText: '',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 1,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _verifyOTP,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  'Xác thực',
+                                  style: TextStyle(fontSize: 12),
+                                  textAlign: TextAlign.center,
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '⚠️ Nhập mã OTP 6 số đã được gửi đến số điện thoại của bạn',
+                    style: TextStyle(fontSize: 12, color: Colors.orange, fontStyle: FontStyle.italic),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                
+                if (_otpVerified) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Số điện thoại đã được xác thực thành công!',
+                            style: TextStyle(color: Colors.green, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
 
                 TextField(
                   controller: _addressController,
